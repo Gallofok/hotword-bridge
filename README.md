@@ -4,14 +4,25 @@ A no-root experimental Android app for a Pixel 7 to detect **Hey ChatGPT** local
 
 **v0.3 — no Picovoice account, AccessKey, .ppn download or ChatGPT API key required.** The English model is packaged into the APK.
 
-## Download and install
+## Direct APK download (no ZIP extraction)
 
-1. Open the **Actions** tab, find a successful **Build debug APK** run on `main`.
-2. Download the `hotword-bridge-sherpa-debug-apk` artifact.
-3. Unzip and install `app-debug.apk` on your Pixel. **Uninstall the old v0.1 APK first**, since CI debug signing keys may differ between runs. Uninstalling clears old app data.
-4. Tap **Start listening** and allow microphone and notification access.
-5. Say **"Hey Chat GPT"** in English. You can also try spelling out G-P-T. This is a keyword-spotting experiment and sensitivity may require tuning after phone testing.
-6. The service stops after detection to release the microphone for ChatGPT.
+**[Download the latest HotwordBridge.apk](https://github.com/Gallofok/hotword-bridge/releases/latest/download/HotwordBridge.apk)**
+
+The `main` branch GitHub Actions workflow builds a signed-for-debug APK and
+publishes it as a **GitHub Release asset** after every successful build.
+The same permanent `releases/latest/download/HotwordBridge.apk` URL points at
+the newest release. Do not choose GitHub's automatically generated "Source code
+(zip)" or the Actions `Artifacts` ZIP.
+
+On Pixel:
+1. Tap the direct link above (sign into GitHub if requested).
+2. Tap `HotwordBridge.apk` from Downloads to install. Allow "Install unknown apps" for the browser/files app when prompted.
+3. If Android says "App not installed" due to signing conflict, uninstall the previous HotwordBridge debug build, then install the new APK. Uninstall clears its settings.
+4. Open HotwordBridge, tap Start listening, and allow microphone + notification permissions.
+5. Test by speaking "Hello World" near the phone before testing "Hey Chat G P T".
+
+This is an **experimental debug build**, not Play Store-certified. GitHub Actions
+success verifies compilation, not successful wake detection on your actual Pixel.
 
 You can build locally with Java 17, Android SDK and Gradle 8.11.1:
 
