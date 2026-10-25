@@ -16,6 +16,11 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
+import android.widget.Toast
+import kotlin.math.log10
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 import com.k2fsa.sherpa.onnx.KeywordSpotter
 import com.k2fsa.sherpa.onnx.KeywordSpotterConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
@@ -37,6 +42,10 @@ class ListeningService : Service() {
     @Volatile private var listening = false
     @Volatile private var workerStarted = false
     private val mainThread = Handler(Looper.getMainLooper())
+    private var totalSamples = 0L
+    private var audioReadCalls = 0L
+    private var decodeSteps = 0L
+    private var lastReportTime = 0L
     private val prefs by lazy { getSharedPreferences("hotword_prefs", MODE_PRIVATE) }
     private val notifications by lazy {
         getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -68,6 +77,14 @@ class ListeningService : Service() {
         }
         if (workerStarted) return START_NOT_STICKY
         workerStarted = true
+        totalSamples = 0L
+        audioReadCalls = 0L
+        decodeSteps = 0L
+        lastReportTime = 0L
+        prefs.edit().putString("diag_stage", "正在加载离线模型")
+            .putLong("samples_total", 0L).putLong("read_calls", 0L)
+            .putLong("decode_steps", 0L).putInt("level_percent", 0)
+            .putInt("rms_db", -99).remove("last_error").apply()
         try {
             val notification = Notification.Builder(this, LISTENING_CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
@@ -135,6 +152,7 @@ class ListeningService : Service() {
                     keywordsThreshold = 0.25f
                 )
             )
+            prefs.edit().putString("diag_stage", "模型加载成功；准备麦克风").apply()
             val stream = engine.createStream()
             try {
                 if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
@@ -159,21 +177,46 @@ class ListeningService : Service() {
                 check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     "麦克风未开始录音"
                 }
+                prefs.edit().putString("diag_stage", "麦克风已启动，正在读取 PCM 数据").apply()
                 val buffer = ShortArray(1600)
                 while (listening) {
                     val count = recorder.read(buffer, 0, buffer.size)
                     if (count < 0) error("录音出错：$count")
                     if (count == 0) continue
+                    // Only aggregate levels and counts; never save or upload audio.
+                    totalSamples += count.toLong()
+                    audioReadCalls += 1
+                    var sumSquare = 0.0
+                    for (i in 0 until count) {
+                        val normalized = buffer[i] / 32768.0
+                        sumSquare += normalized * normalized
+                    }
+                    val rms = sqrt(sumSquare / count)
+                    val dbfs = if (rms <= 0.000001) -99.0 else 20.0 * log10(rms)
+                    val levelPercent = ((dbfs + 60.0) * 2.0).roundToInt().coerceIn(0, 100)
+
                     val samples = FloatArray(count) { buffer[it] / 32768.0f }
                     stream.acceptWaveform(samples, SAMPLE_RATE)
                     while (listening && engine.isReady(stream)) {
                         engine.decode(stream)
+                        decodeSteps += 1
                         val keyword = engine.getResult(stream).keyword
                         if (keyword.isNotBlank()) {
                             detected = keyword
                             listening = false
                             break
                         }
+                    }
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastReportTime >= 700 || !listening) {
+                        lastReportTime = now
+                        prefs.edit().putString("diag_stage", "实时采样中")
+                            .putLong("samples_total", totalSamples)
+                            .putLong("read_calls", audioReadCalls)
+                            .putLong("decode_steps", decodeSteps)
+                            .putInt("rms_db", dbfs.roundToInt())
+                            .putInt("level_percent", levelPercent)
+                            .apply()
                     }
                 }
             } finally {
@@ -194,7 +237,9 @@ class ListeningService : Service() {
                     onWakeWord(wake)
                 } else {
                     if (failure != null) {
-                        prefs.edit().putString("last_error", failure).apply()
+                        prefs.edit()
+                            .putString("diag_stage", "出错并停止")
+                            .putString("last_error", failure).apply()
                     }
                     stopSelf()
                 }
@@ -205,7 +250,35 @@ class ListeningService : Service() {
     private fun onWakeWord(keyword: String) {
         prefs.edit()
             .putString("last_event", "$keyword（麦克风已释放）")
+            .putString("diag_stage", "识别成功，已停止")
             .remove("last_error").apply()
+
+        // The calibration keyword proves the audio + recognizer path.
+        // It intentionally never launches ChatGPT.
+        if (keyword.contains("HELLO_WORLD")) {
+            if (MainActivity.isForeground) {
+                Toast.makeText(
+                    this, "Hello World 测试成功：麦克风和识别器正常",
+                    Toast.LENGTH_LONG
+                ).show()
+            } else {
+                notifications.notify(
+                    WAKE_ID,
+                    Notification.Builder(this, WAKE_CHANNEL)
+                        .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                        .setContentTitle("HotwordBridge 采样测试成功")
+                        .setContentText("已识别 Hello World；麦克风和模型正常")
+                        .setContentIntent(PendingIntent.getActivity(
+                            this, 12, Intent(this, MainActivity::class.java),
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        ))
+                        .setAutoCancel(true)
+                        .build()
+                )
+            }
+            stopSelf()
+            return
+        }
 
         // Android restricts background Activity launches; do not circumvent it.
         val opened = if (MainActivity.isForeground) {
