@@ -20,8 +20,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      # GitHub-hosted Ubuntu already provides Android SDK / ANDROID_HOME.
-      # setup-android@v3 currently tries to install retired 'tools' package.
+      - name: Set up Python for keyword tokenization
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install sentencepiece
+        run: python3 -m pip install --disable-pip-version-check sentencepiece==0.2.1
+      - name: Download pinned offline engine and model
+        run: bash scripts/prepare-sherpa.sh
+      # The GitHub Ubuntu runner provides the Android SDK.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -31,6 +38,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: hotword-bridge-debug-apk
+          name: hotword-bridge-sherpa-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
