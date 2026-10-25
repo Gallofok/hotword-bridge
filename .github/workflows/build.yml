@@ -20,8 +20,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Android SDK
-        uses: android-actions/setup-android@v3
+      # GitHub-hosted Ubuntu already provides Android SDK / ANDROID_HOME.
+      # setup-android@v3 currently tries to install retired 'tools' package.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
