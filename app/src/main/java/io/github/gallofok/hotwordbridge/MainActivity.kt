@@ -65,9 +65,20 @@ class MainActivity : Activity() {
             })
         }
 
-        text("HotwordBridge · 0.3 诊断版", 26f)
+        text("HotwordBridge · 0.4 采样诊断版", 26f)
         text("离线唤醒 · 无需 AccessKey · 实时监测麦克风与识别器", 15f)
         text("先说英文 Hello World 测试麦克风+模型，再测试 Hey Chat G P T。", 16f)
+        button("切换麦克风输入源（需停止监听）") {
+            if (preferences.getBoolean("running", false)) {
+                toast("请先点击停止监听")
+            } else {
+                val old = preferences.getString("audio_source", "MIC")
+                val next = if (old == "MIC") "VOICE_RECOGNITION" else "MIC"
+                preferences.edit().putString("audio_source", next).apply()
+                refreshStatus()
+                toast("下次开始监听将使用：$next")
+            }
+        }
         button("开始监听") { startListening() }
         button("停止监听") {
             stopService(Intent(this, ListeningService::class.java))
@@ -171,20 +182,36 @@ class MainActivity : Activity() {
         val reads = preferences.getLong("read_calls", 0L)
         val steps = preferences.getLong("decode_steps", 0L)
         val db = preferences.getInt("rms_db", -99)
+        val max5sec = preferences.getInt("five_sec_max_db", -99)
+        val voiceFrames = preferences.getInt("five_sec_voice_frames", 0)
+        val totalFrames = preferences.getInt("five_sec_total_frames", 0)
+        val silenced = when (preferences.getInt("mic_silenced", -1)) {
+            1 -> "是（Android 正在静音此录音）"
+            0 -> "否"
+            else -> "未知"
+        }
+        val route = preferences.getString("mic_route", "未知")
+        val source = preferences.getString("audio_source", "MIC")
         val level = preferences.getInt("level_percent", 0)
         val event = preferences.getString("last_event", "").orEmpty()
         val error = preferences.getString("last_error", "").orEmpty()
 
         if (::levelBar.isInitialized) levelBar.progress = if (active) level else 0
         val audioMeaning = when {
-            samples == 0L -> "尚无麦克风采样，可能还在加载模型"
-            db < -58 -> "有采样，但当前几乎静音（检查麦克风/输入源）"
-            else -> "麦克风收到非静音声音"
+            samples == 0L -> "尚无麦克风采样"
+            max5sec > -40 -> "最近 5 秒内有明显声音信号"
+            max5sec > -55 -> "最近 5 秒音量较低，但确实有声"
+            else -> "最近 5 秒信号很弱；靠近麦克风持续讲话重测"
         }
         val sampleSeconds = String.format(java.util.Locale.US, "%.1f", samples / 16000.0)
         statusView.text = "运行：$status\n阶段：$stage\n" +
+            "麦克风输入源：$source（可切换）\n录音设备：$route\n" +
+            "Android 系统静音：$silenced\n" +
             "已读取音频：$sampleSeconds 秒 · $reads 次读取\n" +
-            "输入音量：$db dBFS · $audioMeaning\n" +
+            "当前音量：$db dBFS\n" +
+            "最近 5 秒最高音量：$max5sec dBFS\n" +
+            "最近 5 秒声音窗口：$voiceFrames / $totalFrames（高于 -45 dBFS）\n" +
+            "判断：$audioMeaning\n" +
             "模型解码步数：$steps\n" +
             "识别阈值：Hey ChatGPT=0.12 / Hello World=0.20\n" +
             (if (event.isNotEmpty()) "最近触发：$event\n" else "") +
