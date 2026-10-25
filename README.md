@@ -2,7 +2,7 @@
 
 A no-root experimental Android app for a Pixel 7 to detect **Hey ChatGPT** locally using **sherpa-onnx**, and then hand off to the official ChatGPT Android app.
 
-**v0.2 — no Picovoice account, AccessKey, .ppn download or ChatGPT API key required.** The English model is packaged into the APK.
+**v0.3 — no Picovoice account, AccessKey, .ppn download or ChatGPT API key required.** The English model is packaged into the APK.
 
 ## Download and install
 
@@ -58,3 +58,19 @@ References:
 - https://k2-fsa.github.io/sherpa/onnx/kws/index.html
 - https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html
 - https://developer.android.com/develop/background-work/services/fgs/service-types#microphone
+
+## v0.3 diagnostics: audio recording vs wake-word sensitivity
+
+While keeping the app on screen:
+1. Tap **Start listening** and allow microphone/notification permissions.
+2. Watch the **audio level bar** and read the counters.
+3. Speak normally close to the phone and confirm the bar moves, the input level changes from silence, **audio sample seconds increase**, and **model decode steps increase**.
+4. If sample seconds stay at zero, inspect the displayed model/microphone startup stage and error. Microphone sampling has not started.
+5. If seconds increase but input stays near **-99 dBFS** and the meter is empty, check Android microphone privacy toggle, permission, Bluetooth microphone routing, or competing apps.
+6. If samples and decoding both increase, the microphone and processing are active. Test the more common phrase **Hello World** as a positive control.
+7. If Hello World works but Hey Chat GPT does not, try English spelling **Hey Chat Gee Pee Tee**; otherwise wake-word model tuning is needed.
+8. Tap **Copy diagnostics** and share the *text only* if debugging is needed. Audio content is not saved or uploaded.
+
+The v0.3 profile uses per-keyword boost 2.5, threshold 0.12 for Hey Chat GPT, and 1.5 / 0.20 for Hello World. These are intentionally more permissive than the original defaults and may cause false positives.
+
+This remains a proof-of-concept. GitHub Actions build success proves source compiles, not that any particular device recognizes a spoken phrase.
