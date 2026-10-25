@@ -11,3 +11,5 @@ captures/
 *.keystore
 *.jks
 *.ppn
+app/libs/
+app/src/main/assets/kws/
