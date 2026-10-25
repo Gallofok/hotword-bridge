@@ -46,6 +46,8 @@ class ListeningService : Service() {
     private var audioReadCalls = 0L
     private var decodeSteps = 0L
     private var lastReportTime = 0L
+    // Only 5s of *numeric volume levels* are held in memory, never raw audio.
+    private val recentLevels = ArrayDeque<Pair<Long, Double>>()
     private val prefs by lazy { getSharedPreferences("hotword_prefs", MODE_PRIVATE) }
     private val notifications by lazy {
         getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -81,10 +83,14 @@ class ListeningService : Service() {
         audioReadCalls = 0L
         decodeSteps = 0L
         lastReportTime = 0L
+        recentLevels.clear()
         prefs.edit().putString("diag_stage", "正在加载离线模型")
             .putLong("samples_total", 0L).putLong("read_calls", 0L)
             .putLong("decode_steps", 0L).putInt("level_percent", 0)
-            .putInt("rms_db", -99).remove("last_error").apply()
+            .putInt("rms_db", -99).putInt("five_sec_max_db", -99)
+            .putInt("five_sec_voice_frames", 0).putInt("five_sec_total_frames", 0)
+            .putInt("mic_silenced", -1).putString("mic_route", "未获取")
+            .remove("last_error").apply()
         try {
             val notification = Notification.Builder(this, LISTENING_CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
@@ -163,8 +169,13 @@ class ListeningService : Service() {
                     SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
                 )
                 require(minBytes > 0) { "AudioRecord 缓冲区不可用：$minBytes" }
+                val audioSource = if (prefs.getString("audio_source", "MIC") == "VOICE_RECOGNITION") {
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION
+                } else {
+                    MediaRecorder.AudioSource.MIC
+                }
                 recorder = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
+                    audioSource,
                     SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
@@ -208,9 +219,35 @@ class ListeningService : Service() {
                         }
                     }
                     val now = SystemClock.elapsedRealtime()
+                    recentLevels.addLast(now to dbfs)
+                    while (recentLevels.isNotEmpty() && now - recentLevels.first().first > 5000) {
+                        recentLevels.removeFirst()
+                    }
                     if (now - lastReportTime >= 700 || !listening) {
                         lastReportTime = now
+                        val max5Sec = (recentLevels.maxOfOrNull { it.second } ?: -99.0)
+                            .roundToInt()
+                        val voiceFrames5Sec = recentLevels.count { it.second > -45.0 }
+                        // Android may deliver real-looking read counts but silent audio
+                        // when another app has priority for microphone input.
+                        val frameworkSilenced = if (Build.VERSION.SDK_INT >= 29) {
+                            try {
+                                when (recorder.activeRecordingConfiguration?.isClientSilenced) {
+                                    true -> 1
+                                    false -> 0
+                                    null -> -1
+                                }
+                            } catch (_: RuntimeException) { -1 }
+                        } else -1
+                        val route = try {
+                            recorder.routedDevice?.productName?.toString() ?: "未知"
+                        } catch (_: RuntimeException) { "未知" }
                         prefs.edit().putString("diag_stage", "实时采样中")
+                            .putInt("five_sec_max_db", max5Sec)
+                            .putInt("five_sec_voice_frames", voiceFrames5Sec)
+                            .putInt("five_sec_total_frames", recentLevels.size)
+                            .putInt("mic_silenced", frameworkSilenced)
+                            .putString("mic_route", route)
                             .putLong("samples_total", totalSamples)
                             .putLong("read_calls", audioReadCalls)
                             .putLong("decode_steps", decodeSteps)
