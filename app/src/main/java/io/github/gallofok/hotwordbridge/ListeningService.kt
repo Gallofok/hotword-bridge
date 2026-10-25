@@ -112,7 +112,7 @@ class ListeningService : Service() {
         var engine: KeywordSpotter? = null
         var recorder: AudioRecord? = null
         var detected = ""
-        var error: String? = null
+        var failureMessage: String? = null
         try {
             val dir = "kws"
             val modelConfig = OnlineModelConfig(
@@ -180,7 +180,7 @@ class ListeningService : Service() {
                 try { stream.release() } catch (_: Throwable) { }
             }
         } catch (problem: Throwable) {
-            error = problem.message ?: problem.javaClass.simpleName
+            failureMessage = problem.message ?: problem.javaClass.simpleName
         } finally {
             listening = false
             try { recorder?.stop() } catch (_: Throwable) { }
@@ -188,7 +188,7 @@ class ListeningService : Service() {
             try { engine?.release() } catch (_: Throwable) { }
             prefs.edit().putBoolean("running", false).apply()
             val wake = detected
-            val failure = error
+            val failure = failureMessage
             mainThread.post {
                 if (wake.isNotEmpty()) {
                     onWakeWord(wake)
