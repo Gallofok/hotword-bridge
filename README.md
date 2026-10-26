@@ -2,7 +2,7 @@
 
 A no-root experimental Android app for a Pixel 7 to detect **Hey ChatGPT** locally using **sherpa-onnx**, and then hand off to the official ChatGPT Android app.
 
-**v0.3 — no Picovoice account, AccessKey, .ppn download or ChatGPT API key required.** The English model is packaged into the APK.
+**v0.5 — no Picovoice account, AccessKey, .ppn download or ChatGPT API key required.** The English model is packaged into the APK.
 
 ## Direct APK download (no ZIP extraction)
 
@@ -69,6 +69,29 @@ References:
 - https://k2-fsa.github.io/sherpa/onnx/kws/index.html
 - https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html
 - https://developer.android.com/develop/background-work/services/fgs/service-types#microphone
+
+## v0.5: built-in real-voice regression on Android
+
+The **Run official human recording self-test** button uses an upstream recorded
+human utterance of **LIGHT UP** stored inside the APK as 16 kHz PCM. It streams
+100 ms PCM windows through the *same Android sherpa-onnx AAR* and the same
+model weights, using the upstream reference keywords file. It never uses the
+microphone or starts ChatGPT.
+
+1. Stop microphone listening first.
+2. Tap **运行官方真人录音自测（不使用麦克风）**.
+3. Wait for the result on screen and a toast: expected `LIGHT UP`.
+4. If this passes, the native Android inference pipeline works with a known-good
+   recording; failures on `HEY CHAT GPT` or `HELLO WORLD` then call for
+   keyword/voice/acoustic evaluation rather than just lowering the threshold.
+5. If it fails, inspect the reported error. Our Android model runtime or
+   stream/asset wiring needs fixing before changing wake sensitivity.
+
+The CI also runs the upstream human WAV recordings (`0.wav` / `1.wav`) through
+the same pretrained model on the Linux runner; those known-good cases must
+pass before a new APK is released. eSpeak-synthesized test utterances are reported
+as *non-blocking diagnostics*, because synthetic speech can differ from
+the training data. No audio is uploaded by the Android app.
 
 ## v0.3 diagnostics: audio recording vs wake-word sensitivity
 
