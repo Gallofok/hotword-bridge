@@ -65,7 +65,7 @@ class MainActivity : Activity() {
             })
         }
 
-        text("HotwordBridge · 0.6 双引擎对照版", 26f)
+        text("HotwordBridge · 0.7 直接语音版", 26f)
         text("Vosk 语音转文字 / sherpa-onnx 关键词检测。全程离线，无需 AccessKey。", 15f)
         text("初次使用 Vosk 会解压英语模型，请保留手机足够空间。先说 Hello World，再尝试 Hey Chat G P T。", 16f)
         button("切换识别引擎：Vosk / sherpa（需停止监听）") {
@@ -96,9 +96,34 @@ class MainActivity : Activity() {
             preferences.edit().putBoolean("running", false).apply()
             refreshStatus()
         }
-        button("手动打开 ChatGPT") {
-            try { startActivity(ChatGptLauncher.intent(this)) }
-            catch (error: Exception) { toast("启动失败：${error.message}") }
+        button("切换 ChatGPT 启动方式（自动 / 直接语音 / 语音链接 / 首页）") {
+            val modes = listOf(
+                ChatGptLauncher.MODE_AUTO,
+                ChatGptLauncher.MODE_DIRECT,
+                ChatGptLauncher.MODE_DEEPLINK,
+                ChatGptLauncher.MODE_APP
+            )
+            val current = preferences.getString(
+                "voice_launch_mode", ChatGptLauncher.MODE_AUTO
+            )
+            val next = modes[(modes.indexOf(current).coerceAtLeast(0) + 1) % modes.size]
+            preferences.edit().putString("voice_launch_mode", next).apply()
+            refreshStatus()
+            toast("已选择：" + ChatGptLauncher.modeLabel(next))
+        }
+        button("测试进入 ChatGPT Voice（无需唤醒词）") {
+            val mode = preferences.getString(
+                "voice_launch_mode", ChatGptLauncher.MODE_AUTO
+            ) ?: ChatGptLauncher.MODE_AUTO
+            try {
+                val result = ChatGptLauncher.launch(this, mode)
+                preferences.edit().putString("voice_launch_result", result).apply()
+                toast(result)
+            } catch (error: Exception) {
+                val message = "启动失败：" + (error.message ?: "未知错误")
+                preferences.edit().putString("voice_launch_result", message).apply()
+                toast(message)
+            }
         }
         text("实时输入音量（说话时进度条应上升）", 16f)
         levelBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -233,6 +258,11 @@ class MainActivity : Activity() {
         val utterances = preferences.getInt("vosk_utterances", 0)
         val level = preferences.getInt("level_percent", 0)
         val selfTest = preferences.getString("self_test", "尚未运行").orEmpty()
+        val voiceMode = preferences.getString("voice_launch_mode", ChatGptLauncher.MODE_AUTO)
+            ?: ChatGptLauncher.MODE_AUTO
+        val voiceLaunchResult = preferences.getString("voice_launch_result", "尚未测试")
+            .orEmpty()
+        val directAvailable = if (ChatGptLauncher.isDirectAvailable(this)) "是" else "否"
         val event = preferences.getString("last_event", "").orEmpty()
         val error = preferences.getString("last_error", "").orEmpty()
 
@@ -246,6 +276,9 @@ class MainActivity : Activity() {
         val sampleSeconds = String.format(java.util.Locale.US, "%.1f", samples / 16000.0)
         statusView.text = "运行：$status\n阶段：$stage\n" +
             "选定引擎：$engine · 当前服务引擎：$runningEngine\n" +
+            "语音启动方式：" + ChatGptLauncher.modeLabel(voiceMode) + "\n" +
+            "ChatGPT 语音 Activity 可访问：$directAvailable\n" +
+            "上次启动尝试：$voiceLaunchResult\n" +
             "麦克风输入源：$source（可切换）\n录音设备：$route\n" +
             "Android 系统静音：$silenced\n" +
             "已读取音频：$sampleSeconds 秒 · $reads 次读取\n" +
