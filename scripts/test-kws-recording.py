@@ -88,6 +88,7 @@ def main() -> int:
     cases = [
         ("official real speech #0", FIXTURES / "0.wav", FIXTURES / "official_keywords.txt", "LIGHT UP", True),
         ("official real speech #1", FIXTURES / "1.wav", FIXTURES / "official_keywords.txt", "LOVELY CHILD", True),
+        ("synthetic LIGHT UP", FIXTURES / "light-up-synthetic.wav", FIXTURES / "official_keywords.txt", "LIGHT UP", False),
         ("synthetic HELLO WORLD", FIXTURES / "hello-world-synthetic.wav", MODEL / "keywords.txt", "HELLO_WORLD_TEST", False),
         ("synthetic HEY CHAT GPT", FIXTURES / "hey-chat-gpt-synthetic.wav", MODEL / "keywords.txt", "HEY_CHATGPT", False),
     ]
