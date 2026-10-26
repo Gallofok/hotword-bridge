@@ -13,3 +13,5 @@ captures/
 *.ppn
 app/libs/
 app/src/main/assets/kws/
+# Vosk model is downloaded and verified by GitHub Actions
+app/src/main/assets/vosk-model.zip
