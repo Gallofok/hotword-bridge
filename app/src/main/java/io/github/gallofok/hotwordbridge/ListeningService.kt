@@ -445,13 +445,28 @@ class ListeningService : Service() {
             return
         }
 
-        // Android restricts background Activity launches; do not circumvent it.
+        // Android restricts background Activity launches. When the app is
+        // backgrounded, issue a user-tappable PendingIntent, not startActivity().
+        val launchMode = prefs.getString(
+            "voice_launch_mode", ChatGptLauncher.MODE_AUTO
+        ) ?: ChatGptLauncher.MODE_AUTO
         val opened = if (MainActivity.isForeground) {
-            try { startActivity(ChatGptLauncher.intent(this)); true }
-            catch (_: Exception) { false }
+            try {
+                val report = ChatGptLauncher.launch(this, launchMode)
+                prefs.edit().putString("voice_launch_result", report).apply()
+                true
+            } catch (error: Exception) {
+                prefs.edit().putString("voice_launch_result",
+                    "启动失败：" + (error.message ?: "未知错误")).apply()
+                false
+            }
         } else false
 
         if (!opened) {
+            if (!MainActivity.isForeground) {
+                prefs.edit().putString("voice_launch_result",
+                    "后台命中：已发送语音启动通知（需手动点击）").apply()
+            }
             try {
                 notifications.notify(
                     WAKE_ID,
@@ -459,7 +474,7 @@ class ListeningService : Service() {
                         .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                         .setContentTitle("已听到 Hey ChatGPT")
                         .setContentText("点击打开 ChatGPT 语音对话")
-                        .setContentIntent(ChatGptLauncher.pendingIntent(this))
+                        .setContentIntent(ChatGptLauncher.pendingIntent(this, launchMode))
                         .setAutoCancel(true)
                         .setCategory(Notification.CATEGORY_REMINDER)
                         .build()
