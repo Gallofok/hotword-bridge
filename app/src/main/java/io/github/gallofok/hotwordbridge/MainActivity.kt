@@ -374,6 +374,7 @@ class MainActivity : Activity() {
             .orEmpty()
         val directAvailable = if (ChatGptLauncher.isDirectAvailable(this)) "是" else "否"
         val event = preferences.getString("last_event", "").orEmpty()
+        val personalScore = preferences.getString("personal_last_score", "尚未测试").orEmpty()
         val error = preferences.getString("last_error", "").orEmpty()
 
         if (::levelBar.isInitialized) levelBar.progress = if (active) level else 0
@@ -420,6 +421,7 @@ class MainActivity : Activity() {
             "最近 5 秒声音窗口：$voiceFrames / $totalFrames（高于 -45 dBFS）\n" +
             "判断：$audioMeaning\n" +
             "模型解码步数：$steps\n" +
+            "个人声学匹配结果：$personalScore\n" +
             "标准录音自测：$selfTest\n" +
             (if (engine == "VOSK") {
                 "Vosk 已完成话语：$utterances\n" +
