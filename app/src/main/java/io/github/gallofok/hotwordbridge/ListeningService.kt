@@ -86,6 +86,14 @@ class ListeningService : Service() {
         recentLevels.clear()
         val selectedEngine = prefs.getString("engine", "VOSK") ?: "VOSK"
         prefs.edit().putString("active_engine", selectedEngine)
+            .putLong("session_started_at", System.currentTimeMillis())
+            .remove("last_event")
+            .remove("personal_last_score")
+            .remove("vosk_candidate")
+            .remove("vosk_partial")
+            .remove("vosk_final")
+            .remove("vosk_log")
+            .putInt("vosk_utterances", 0)
             .putString("diag_stage", "正在加载离线模型")
             .putLong("samples_total", 0L).putLong("read_calls", 0L)
             .putLong("decode_steps", 0L).putInt("level_percent", 0)
@@ -304,9 +312,12 @@ class ListeningService : Service() {
         var detected = ""
         var failure: String? = null
         try {
-            engine = VoskAsrEngine(this, prefs) { stage ->
-                prefs.edit().putString("diag_stage", stage).apply()
-            }
+            engine = VoskAsrEngine(this, prefs,
+                onStage = { stage ->
+                    prefs.edit().putString("diag_stage", stage).apply()
+                },
+                limitedGrammar = prefs.getBoolean("vosk_limited_grammar", false)
+            )
             if (!listening) return
             if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
                 PackageManager.PERMISSION_GRANTED) {
@@ -435,10 +446,11 @@ class ListeningService : Service() {
                 SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
             )
             check(minBytes > 0) { "PCM 缓冲区无效" }
-            val audioSource = if (prefs.getString("audio_source", "MIC") == "VOICE_RECOGNITION") {
-                MediaRecorder.AudioSource.VOICE_RECOGNITION
-            } else MediaRecorder.AudioSource.MIC
-            recorder = AudioRecord(audioSource, SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
+            // All v0.8 enrollment recordings use VOICE_RECOGNITION regardless
+            // of the UI selector. Force the same capture mode on PERSONAL
+            // listening, so existing private samples remain compatible.
+            recorder = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT, maxOf(minBytes * 2, 6400))
             check(recorder.state == AudioRecord.STATE_INITIALIZED) { "麦克风未初始化" }
             recorder.startRecording()
