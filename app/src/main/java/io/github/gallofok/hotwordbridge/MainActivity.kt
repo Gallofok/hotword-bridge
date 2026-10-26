@@ -71,7 +71,7 @@ class MainActivity : Activity() {
             })
         }
 
-        text("HotwordBridge · 0.8 个人本地训练版", 26f)
+        text("HotwordBridge · 0.9 诊断与词表实验版", 26f)
         text("Vosk 语音转文字 / sherpa-onnx 关键词检测。全程离线，无需 AccessKey。", 15f)
         text("初次使用 Vosk 会解压英语模型，请保留手机足够空间。先说 Hello World，再尝试 Hey Chat G P T。", 16f)
         button("切换识别引擎：Vosk / sherpa / 个人模板（需停止监听）") {
@@ -90,6 +90,18 @@ class MainActivity : Activity() {
                 toast("下次启动使用：$next")
             }
         }
+        button("切换 Vosk 识别词表：完整英语 / 唤醒短语实验（需停止监听）") {
+            if (preferences.getBoolean("running", false)) {
+                toast("请先停止监听")
+            } else {
+                val limited = !preferences.getBoolean("vosk_limited_grammar", false)
+                preferences.edit().putBoolean("vosk_limited_grammar", limited).apply()
+                refreshStatus()
+                toast(if (limited) {
+                    "下次 Vosk 启用受限词表：仅实验，注意误唤醒"
+                } else "下次 Vosk 使用完整英语转写")
+            }
+        }
         button("切换麦克风输入源（需停止监听）") {
             if (preferences.getBoolean("running", false)) {
                 toast("请先点击停止监听")
@@ -98,7 +110,9 @@ class MainActivity : Activity() {
                 val next = if (old == "MIC") "VOICE_RECOGNITION" else "MIC"
                 preferences.edit().putString("audio_source", next).apply()
                 refreshStatus()
-                toast("下次开始监听将使用：$next")
+                toast(if (preferences.getString("engine", "VOSK") == "PERSONAL") {
+                    "PERSONAL 为兼容训练样本固定使用 VOICE_RECOGNITION；其它引擎下次使用：$next"
+                } else "下次开始监听将使用：$next")
             }
         }
         button("开始监听") { startListening() }
@@ -359,12 +373,24 @@ class MainActivity : Activity() {
             else -> "未知"
         }
         val route = preferences.getString("mic_route", "未知")
-        val source = preferences.getString("audio_source", "MIC")
+        val sourceSetting = preferences.getString("audio_source", "MIC")
+        val source = if (preferences.getString("engine", "VOSK") == "PERSONAL") {
+            "VOICE_RECOGNITION（个人训练/监听统一）"
+        } else sourceSetting
         val engine = preferences.getString("engine", "VOSK")
         val runningEngine = preferences.getString("active_engine", "无")
         val partial = preferences.getString("vosk_partial", "").orEmpty()
         val finalResult = preferences.getString("vosk_final", "").orEmpty()
         val log = preferences.getString("vosk_log", "").orEmpty()
+        val voskLimited = preferences.getBoolean("vosk_limited_grammar", false)
+        val voskActualMode = preferences.getString("vosk_effective_mode", "尚未启动").orEmpty()
+        val voskCandidate = preferences.getString("vosk_candidate", "").orEmpty()
+        val voskWarning = preferences.getString("vosk_grammar_warning", "").orEmpty()
+        val sessionStart = preferences.getLong("session_started_at", 0L)
+        val sessionDescription = if (sessionStart > 0L)
+            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                .format(java.util.Date(sessionStart))
+        else "尚未开始"
         val utterances = preferences.getInt("vosk_utterances", 0)
         val level = preferences.getInt("level_percent", 0)
         val selfTest = preferences.getString("self_test", "尚未运行").orEmpty()
@@ -409,6 +435,7 @@ class MainActivity : Activity() {
                 if (capturingClip) "\n正在录音，请说话…" else ""
         }
         statusView.text = "运行：$status\n阶段：$stage\n" +
+            "本次会话开始：$sessionDescription\n" +
             "选定引擎：$engine · 当前服务引擎：$runningEngine\n" +
             "语音启动方式：" + ChatGptLauncher.modeLabel(voiceMode) + "\n" +
             "ChatGPT 语音 Activity 可访问：$directAvailable\n" +
@@ -421,15 +448,22 @@ class MainActivity : Activity() {
             "最近 5 秒声音窗口：$voiceFrames / $totalFrames（高于 -45 dBFS）\n" +
             "判断：$audioMeaning\n" +
             "模型解码步数：$steps\n" +
-            "个人声学匹配结果：$personalScore\n" +
+            (if (engine == "PERSONAL") "个人声学匹配结果：$personalScore\n" else "") +
             "标准录音自测：$selfTest\n" +
             (if (engine == "VOSK") {
                 "Vosk 已完成话语：$utterances\n" +
+                "Vosk 词表设置：" +
+                    (if (voskLimited) "唤醒短语实验" else "完整英语") +
+                    " · 实际模式：$voskActualMode\n" +
+                    (if (voskWarning.isNotBlank()) "词表提示：$voskWarning\n" else "") +
+                    "近似发音候选（不触发）：${voskCandidate.ifBlank { "（暂无）" }}\n" +
                 "Vosk 实时识别：${partial.ifBlank { "（暂无）" }}\n" +
                 "Vosk 最近完整句：${finalResult.ifBlank { "（暂无）" }}\n" +
                 "Vosk 转写记录（仅本机）：\n${log.ifBlank { "（暂无）" }}\n"
-            } else {
+            } else if (engine == "SHERPA") {
                 "sherpa 阈值：Hey ChatGPT=0.12 / Hello World=0.20\n"
+            } else {
+                "PERSONAL：使用训练模型内的阈值，以上为最近一次声学比较结果\n"
             }) +
             (if (event.isNotEmpty()) "最近触发：$event\n" else "") +
             (if (error.isNotEmpty()) "错误：$error" else "")
