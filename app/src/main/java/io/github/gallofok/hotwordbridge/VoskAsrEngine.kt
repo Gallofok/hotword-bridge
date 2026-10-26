@@ -3,6 +3,7 @@ package io.github.gallofok.hotwordbridge
 import android.content.Context
 import android.content.SharedPreferences
 import org.json.JSONObject
+import org.json.JSONArray
 import org.vosk.Model
 import org.vosk.Recognizer
 import java.io.File
@@ -16,13 +17,15 @@ import java.util.zip.ZipInputStream
 class VoskAsrEngine(
     context: Context,
     private val prefs: SharedPreferences,
-    private val onStage: (String) -> Unit
+    private val onStage: (String) -> Unit,
+    private val limitedGrammar: Boolean = false
 ) : AutoCloseable {
 
     private val model: Model
     private val recognizer: Recognizer
     private var lastPartial = ""
     private var utterances = 0
+    private var activeGrammar = false
 
     init {
         onStage("Vosk 模型检查／首次使用时自动解压（约 50 MB）")
@@ -30,7 +33,35 @@ class VoskAsrEngine(
         onStage("Vosk 正在加载英语模型（可能需要数秒）")
         model = Model(modelDir.absolutePath)
         try {
-            recognizer = Recognizer(model, 16000.0f)
+            // A small grammar is an OPT-IN experiment, never the default.
+            // [unk] keeps a path for speech outside our target phrases.
+            // We retain a few hard negatives to make false positives observable.
+            val grammar = JSONArray(listOf(
+                "hey chat g p t",
+                "hey chat gpt",
+                "hey chat gee pee tee",
+                "hello world",
+                "hey google",
+                "hey check your pity",
+                "[unk]"
+            )).toString()
+            var fallback = ""
+            recognizer = if (limitedGrammar) {
+                try {
+                    val constrained = Recognizer(model, 16000.0f, grammar)
+                    activeGrammar = true
+                    constrained
+                } catch (error: Exception) {
+                    fallback = "限定词表不可用，已回退完整转写：" +
+                        (error.message ?: error.javaClass.simpleName)
+                    Recognizer(model, 16000.0f)
+                }
+            } else Recognizer(model, 16000.0f)
+            prefs.edit()
+                .putString("vosk_effective_mode",
+                    if (activeGrammar) "受限词表实验" else "完整英语转写")
+                .putString("vosk_grammar_warning", fallback)
+                .apply()
         } catch (error: Throwable) {
             model.close()
             throw error
@@ -39,6 +70,7 @@ class VoskAsrEngine(
             .putString("vosk_partial", "")
             .putString("vosk_final", "")
             .putString("vosk_log", "")
+            .putString("vosk_candidate", "")
             .putInt("vosk_utterances", 0)
             .apply()
     }
@@ -71,10 +103,20 @@ class VoskAsrEngine(
             prefs.edit().putString("vosk_partial", text).apply()
         }
 
-        // Match exact words, not arbitrary substrings; avoid triggering on "chat" alone.
+        // Read-only hint about likely phonetic confusions. It never triggers.
+        // Avoid broad matching: "chat" by itself must not launch ChatGPT.
         val normalized = text.lowercase()
             .replace(Regex("[^a-z0-9]+"), " ")
             .trim()
+        if (normalized.startsWith("hey ") &&
+            Regex("""\b(chat|check|chet|church|treachery)\b""")
+                .containsMatchIn(normalized)) {
+            prefs.edit().putString("vosk_candidate",
+                text + if (ended) "（完整句）" else "（实时草稿）").apply()
+        }
+        // Constrained grammars may hallucinate targets on unrelated speech.
+        // Only consider a completed utterance for wake in this experiment.
+        if (activeGrammar && !ended) return null
         if (Regex("""\bhello\s+world\b""").containsMatchIn(normalized)) {
             return "VOSK_HELLO_WORLD_TEST"
         }
