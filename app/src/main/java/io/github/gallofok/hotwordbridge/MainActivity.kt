@@ -105,7 +105,7 @@ class MainActivity : Activity() {
             )
             val current = preferences.getString(
                 "voice_launch_mode", ChatGptLauncher.MODE_AUTO
-            )
+            ) ?: ChatGptLauncher.MODE_AUTO
             val next = modes[(modes.indexOf(current).coerceAtLeast(0) + 1) % modes.size]
             preferences.edit().putString("voice_launch_mode", next).apply()
             refreshStatus()
