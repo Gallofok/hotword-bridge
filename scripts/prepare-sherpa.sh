@@ -30,5 +30,14 @@ for f in \
   cp "$src/$f" "$dst/$f"
 done
 
+# Use sherpa-onnx's own real-world audio recordings for reproducible CI tests.
+# They are NOT packaged into the Android APK.
+mkdir -p test-fixtures/kws
+for f in 0.wav 1.wav; do
+  test -s "$src/test_wavs/$f" || { echo "Missing official test recording $f" >&2; exit 1; }
+  cp "$src/test_wavs/$f" "test-fixtures/kws/$f"
+done
+cp "$src/test_wavs/test_keywords.txt" test-fixtures/kws/official_keywords.txt
+
 python3 scripts/generate-keywords.py "$dst/bpe.model" "$dst/tokens.txt" "$dst/keywords.txt"
 echo "Prepared sherpa-onnx Android AAR and offline keyword-spotting assets."
