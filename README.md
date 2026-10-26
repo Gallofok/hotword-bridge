@@ -1,8 +1,48 @@
+## v0.7 — launch ChatGPT Voice, not just the ChatGPT home screen
+
+v0.7 retains the offline Vosk and sherpa-onnx recognition engines and adds
+**experimental direct ChatGPT Voice launching**. A wake hit first releases the
+HotwordBridge microphone, then uses your configured launch mode.
+
+The four modes in **切换 ChatGPT 启动方式**:
+1. **Auto (default)** checks whether the installed ChatGPT exposes its
+   `com.openai.voice.assistant.AssistantActivity` with no extra permission.
+   If yes, tries that component; if not, tries an app-scoped
+   `https://chat.com/?mode=voice` link; last fallback is the regular app.
+2. **Direct Voice Activity** only tries the undocumented component.
+3. **Voice Link** only tries the undocumented/implementation-dependent
+   `chat.com/?mode=voice` link in the ChatGPT Android package.
+4. **App only** opens the main ChatGPT app, as v0.6 did.
+
+**Test without speaking first:** tap **测试进入 ChatGPT Voice（无需唤醒词）**.
+Look for the actual interactive Voice UI and verify that it accepts speech;
+`startActivity()` returning without an exception only proves the OS accepted
+the launch request, **not** that a Voice session really started.
+
+**Official fallback:** ChatGPT → Settings → Voice → **Start with Voice**
+(where available). This officially starts Voice when opening a new or empty
+chat. Background Conversations may help keep an active Voice session alive.
+
+**Android lock screen/background caveat:** HotwordBridge still sends a
+tap-to-open notification if the wake occurs with our app in the background.
+We do not bypass Android's background-activity and secure-keyguard policies.
+GPTWake uses additional overlay/assistant-role infrastructure for some
+devices; our app has **not implemented or Pixel-tested that path**.
+
+The direct Activity name and `chat.com/?mode=voice` link are **not guaranteed
+public stable APIs** and can break with a ChatGPT update. Prefer Auto or
+choose another mode if one opens only the main app. Setting ChatGPT as the
+Android default digital assistant may be necessary for lock-screen mic
+access in some OS/app versions, but HotwordBridge cannot set that itself.
+
+Source reference for the experimental launch component:
+https://github.com/suddenBook/GPTWake/blob/main/app/src/main/java/com/desmond/gptwake/GptLauncher.java
+
 # HotwordBridge — offline "Hey ChatGPT" for Android
 
 A no-root experimental Android app for a Pixel 7 to detect **Hey ChatGPT** locally using **sherpa-onnx**, and then hand off to the official ChatGPT Android app.
 
-**v0.6 — no Picovoice account, AccessKey, .ppn download or ChatGPT API key required.** The English model is packaged into the APK.
+**v0.7 — no Picovoice account, AccessKey, .ppn download or ChatGPT API key required.** The English model is packaged into the APK.
 
 ## Direct APK download (no ZIP extraction)
 
