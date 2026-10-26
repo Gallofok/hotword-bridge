@@ -1,3 +1,35 @@
+## v0.9 — session-clean diagnostics and optional Vosk wake grammar
+
+Changes (all work offline):
+- The listener clears the previous trigger and per-engine diagnostic values
+  whenever a **new** session starts, and displays its start timestamp.
+- The PERSONAL listener now **always** uses
+  `MediaRecorder.AudioSource.VOICE_RECOGNITION`, matching the recording
+  mode used by the 22-example enrollment wizard in v0.8. Existing private
+  voice recordings/models remain compatible.
+- In Vosk mode, **完整英语** remains the default. An optional
+  **唤醒短语实验** limits Vosk's recognition grammar to a few short
+  examples, hard negatives, and `[unk]`. This feature is **experimental**:
+  a limited grammar can force an unrelated voice into an allowed phrase,
+  making false wake-ups *more likely*. Therefore wake matching in constrained
+  mode happens only on completed utterances; earlier partial hypotheses
+  still appear on screen but cannot trigger.
+- Vosk displays likely misheard wake phrases as a **read-only candidate**;
+  these do not trigger ChatGPT or bypass exact-match rules.
+- Diagnostic UI hides PERSONAL scores while using Vosk or sherpa, and
+  no longer shows sherpa thresholds as the active PERSONAL threshold.
+
+**Upgrade warning for self-recorded data:** v0.8 uses GitHub Actions'
+debug APK signature. Fresh CI runners may generate a *different* signing
+certificate for new APKs, so installation over the old version might report
+a signature mismatch. **Uninstalling v0.8 deletes the private 22 recordings
+and personal model**, because `allowBackup=false`. Do **not** uninstall
+an existing trained v0.8 copy without accepting this data loss. CI APK
+completion does not prove that an in-place update will be possible.
+A stable private release signing key and export/import are separate work.
+
+Vosk grammar reference: https://javadoc.io/static/com.alphacephei/vosk-android/0.3.75/org/vosk/Recognizer.html
+
 ## v0.8 — personalized training wholly on your Pixel (experimental)
 
 **This is a PERSONAL acoustic template matcher, not on-phone neural-network
