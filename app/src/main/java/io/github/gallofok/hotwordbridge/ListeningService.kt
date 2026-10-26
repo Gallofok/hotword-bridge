@@ -84,7 +84,9 @@ class ListeningService : Service() {
         decodeSteps = 0L
         lastReportTime = 0L
         recentLevels.clear()
-        prefs.edit().putString("diag_stage", "正在加载离线模型")
+        val selectedEngine = prefs.getString("engine", "VOSK") ?: "VOSK"
+        prefs.edit().putString("active_engine", selectedEngine)
+            .putString("diag_stage", "正在加载离线模型")
             .putLong("samples_total", 0L).putLong("read_calls", 0L)
             .putLong("decode_steps", 0L).putInt("level_percent", 0)
             .putInt("rms_db", -99).putInt("five_sec_max_db", -99)
@@ -120,7 +122,10 @@ class ListeningService : Service() {
             }
             listening = true
             prefs.edit().putBoolean("running", true).remove("last_error").apply()
-            thread(name = "sherpa-kws", start = true) { recognizeLoop() }
+            thread(name = "hotword-$selectedEngine", start = true) {
+                if (selectedEngine == "VOSK") recognizeVoskLoop()
+                else recognizeLoop()
+            }
         } catch (error: Throwable) {
             prefs.edit()
                 .putBoolean("running", false)
@@ -277,6 +282,129 @@ class ListeningService : Service() {
                         prefs.edit()
                             .putString("diag_stage", "出错并停止")
                             .putString("last_error", failure).apply()
+                    }
+                    stopSelf()
+                }
+            }
+        }
+    }
+
+    /**
+     * Vosk ASR comparison mode.
+     * Uses the same 16 kHz mono PCM capture, meter and Android audio source as KWS,
+     * but a full speech recognizer instead of token-sequence keyword spotting.
+     * Vosk performs its own utterance endpointing; feed quiet frames too.
+     */
+    private fun recognizeVoskLoop() {
+        var engine: VoskAsrEngine? = null
+        var recorder: AudioRecord? = null
+        var detected = ""
+        var failure: String? = null
+        try {
+            engine = VoskAsrEngine(this, prefs) { stage ->
+                prefs.edit().putString("diag_stage", stage).apply()
+            }
+            if (!listening) return
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                PackageManager.PERMISSION_GRANTED) {
+                error("麦克风权限未获授权")
+            }
+            val minBytes = AudioRecord.getMinBufferSize(
+                SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+            )
+            require(minBytes > 0) { "麦克风 buffer 无效：$minBytes" }
+            val audioSource = if (prefs.getString("audio_source", "MIC") == "VOICE_RECOGNITION") {
+                MediaRecorder.AudioSource.VOICE_RECOGNITION
+            } else {
+                MediaRecorder.AudioSource.MIC
+            }
+            recorder = AudioRecord(
+                audioSource, SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                maxOf(minBytes * 2, 6400)
+            )
+            check(recorder.state == AudioRecord.STATE_INITIALIZED) {
+                "Vosk 麦克风初始化失败"
+            }
+            recorder.startRecording()
+            check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                "麦克风未开始录音"
+            }
+            prefs.edit().putString("diag_stage", "Vosk 实时转写中").apply()
+            val buffer = ShortArray(1600)
+            while (listening) {
+                val count = recorder.read(buffer, 0, buffer.size)
+                if (count < 0) error("录音出错：$count")
+                if (count == 0) continue
+                totalSamples += count.toLong()
+                audioReadCalls += 1
+                var sumSquare = 0.0
+                for (i in 0 until count) {
+                    val value = buffer[i] / 32768.0
+                    sumSquare += value * value
+                }
+                val rms = sqrt(sumSquare / count)
+                val dbfs = if (rms <= 0.000001) -99.0 else 20.0 * log10(rms)
+                val hit = engine.accept(buffer, count)
+                decodeSteps += 1
+                if (hit != null) {
+                    detected = hit
+                    listening = false
+                }
+                val now = SystemClock.elapsedRealtime()
+                recentLevels.addLast(now to dbfs)
+                while (recentLevels.isNotEmpty() && now - recentLevels.first().first > 5000) {
+                    recentLevels.removeFirst()
+                }
+                if (now - lastReportTime >= 650 || !listening) {
+                    lastReportTime = now
+                    val frameworkSilenced = if (Build.VERSION.SDK_INT >= 29) {
+                        try {
+                            when (recorder.activeRecordingConfiguration?.isClientSilenced) {
+                                true -> 1
+                                false -> 0
+                                null -> -1
+                            }
+                        } catch (_: RuntimeException) { -1 }
+                    } else -1
+                    val route = try {
+                        recorder.routedDevice?.productName?.toString() ?: "未知"
+                    } catch (_: RuntimeException) { "未知" }
+                    prefs.edit()
+                        .putString("diag_stage", "Vosk 实时转写中")
+                        .putLong("samples_total", totalSamples)
+                        .putLong("read_calls", audioReadCalls)
+                        .putLong("decode_steps", decodeSteps)
+                        .putInt("rms_db", dbfs.roundToInt())
+                        .putInt("level_percent", ((dbfs + 60.0) * 2.0).roundToInt().coerceIn(0, 100))
+                        .putInt("five_sec_max_db", recentLevels.maxOfOrNull { it.second }
+                            ?.roundToInt() ?: -99)
+                        .putInt("five_sec_voice_frames", recentLevels.count { it.second > -45.0 })
+                        .putInt("five_sec_total_frames", recentLevels.size)
+                        .putInt("mic_silenced", frameworkSilenced)
+                        .putString("mic_route", route)
+                        .apply()
+                }
+            }
+        } catch (problem: Throwable) {
+            failure = problem.message ?: problem.javaClass.simpleName
+        } finally {
+            listening = false
+            try { recorder?.stop() } catch (_: Throwable) {}
+            try { recorder?.release() } catch (_: Throwable) {}
+            try { engine?.close() } catch (_: Throwable) {}
+            prefs.edit().putBoolean("running", false).apply()
+            val lastHit = detected
+            val lastError = failure
+            mainThread.post {
+                if (lastHit.isNotEmpty()) {
+                    onWakeWord(lastHit)
+                } else {
+                    if (lastError != null) {
+                        prefs.edit()
+                            .putString("diag_stage", "Vosk 运行出错")
+                            .putString("last_error", lastError)
+                            .apply()
                     }
                     stopSelf()
                 }
