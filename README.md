@@ -1,3 +1,45 @@
+## v0.8 — personalized training wholly on your Pixel (experimental)
+
+**This is a PERSONAL acoustic template matcher, not on-phone neural-network
+training or openWakeWord fine-tuning.** Voice clips never leave the device or
+the app-private directory. You do not need a server, training account or
+a second phone. Speech matching quality is not yet verified.
+
+### Guided 22-clip enrollment
+
+1. Stop any running hotword listener, open HotwordBridge v0.8.
+2. At **个人唤醒词训练（离线）**, read the on-screen phrase and speech-rate
+   instruction. English pronunciation cue: Hey / Chat / G / P / T.
+3. Tap **录制当前提示句** and say the phrase naturally during the following
+   3.3 seconds (start about half a second after tapping). Each tap
+   records exactly **one** sample. The prompt automatically advances.
+4. Capture 14 wake-positive examples: 6 normal, 6 fast, 2 soft/distant.
+5. Capture 4 hard negatives: Hey Google, Hey Check GPS, Hello World and
+   I want to check something.
+6. Capture 4 held-out testing examples: 2 positives and 2 negatives.
+7. Tap **使用本机样本训练个人模型**. The app computes normalized short-window
+   log-frequency acoustic features and dynamic time warping templates
+   on the phone. It tunes thresholds with negative samples and reports
+   test hits vs false hits.
+8. Tap **应用已训练的个人唤醒模型**, then **开始监听** and say Hey ChatGPT
+   normally / quickly. The diagnostics report nearest positive and negative
+   distances and match threshold.
+9. Stop and switch recognition engines to VOSK or SHERPA any time
+   for comparison. Erasing personal recordings/model is a two-tap confirmation.
+
+This is an R&D prototype. It may miss wake words and mis-trigger on
+similar speech, other people or playback. We do not claim Google Assistant
+production-level accuracy. Acoustic models are stored privately at
+`filesDir/personal_wake`; raw recordings and model are cleared on app
+uninstall or via **删除所有个人录音和训练结果**.
+
+The next step to get **a neural wake-word classifier** is training
+openWakeWord using a larger dataset on a desktop/remote GPU, then
+shipping its feature extraction and inference pipeline on Android.
+
+The voice conversation launch choice is independent; the experimental
+ChatGPT direct Activity or deep link still may open only the app home page.
+
 ## v0.7 — launch ChatGPT Voice, not just the ChatGPT home screen
 
 v0.7 retains the offline Vosk and sherpa-onnx recognition engines and adds
@@ -42,7 +84,7 @@ https://github.com/suddenBook/GPTWake/blob/main/app/src/main/java/com/desmond/gp
 
 A no-root experimental Android app for a Pixel 7 to detect **Hey ChatGPT** locally using **sherpa-onnx**, and then hand off to the official ChatGPT Android app.
 
-**v0.7 — no Picovoice account, AccessKey, .ppn download or ChatGPT API key required.** The English model is packaged into the APK.
+**v0.8 — no Picovoice account, AccessKey, .ppn download or ChatGPT API key required.** The English model is packaged into the APK.
 
 ## Direct APK download (no ZIP extraction)
 
