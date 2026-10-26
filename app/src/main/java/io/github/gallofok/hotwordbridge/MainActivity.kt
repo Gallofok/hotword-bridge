@@ -22,12 +22,18 @@ class MainActivity : Activity() {
     companion object {
         @Volatile var isForeground = false
         private const val REQUEST_PERMISSIONS = 110
+        private const val REQUEST_TRAIN_RECORD = 111
     }
 
     private val preferences by lazy { getSharedPreferences("hotword_prefs", MODE_PRIVATE) }
     private lateinit var statusView: TextView
     private lateinit var levelBar: ProgressBar
     private var startAfterPermission = false
+    private var pendingClip = -1
+    private var capturingClip = false
+    private var trainingModel = false
+    private var confirmErase = false
+    private lateinit var trainStatusView: TextView
     private val uiHandler = Handler(Looper.getMainLooper())
     private val refreshRunnable = object : Runnable {
         override fun run() {
@@ -65,16 +71,21 @@ class MainActivity : Activity() {
             })
         }
 
-        text("HotwordBridge · 0.7 直接语音版", 26f)
+        text("HotwordBridge · 0.8 个人本地训练版", 26f)
         text("Vosk 语音转文字 / sherpa-onnx 关键词检测。全程离线，无需 AccessKey。", 15f)
         text("初次使用 Vosk 会解压英语模型，请保留手机足够空间。先说 Hello World，再尝试 Hey Chat G P T。", 16f)
-        button("切换识别引擎：Vosk / sherpa（需停止监听）") {
+        button("切换识别引擎：Vosk / sherpa / 个人模板（需停止监听）") {
             if (preferences.getBoolean("running", false)) {
                 toast("请先停止监听")
             } else {
                 val old = preferences.getString("engine", "VOSK")
-                val next = if (old == "VOSK") "SHERPA" else "VOSK"
-                preferences.edit().putString("engine", next).apply()
+                val modes = listOf("VOSK", "SHERPA", "PERSONAL")
+                val next = modes[(modes.indexOf(old) + 1).coerceAtLeast(0) % modes.size]
+                if (next == "PERSONAL" && !PersonalWake.ready(this)) {
+                    toast("请先完成个人录音和本地训练")
+                } else {
+                    preferences.edit().putString("engine", next).apply()
+                }
                 refreshStatus()
                 toast("下次启动使用：$next")
             }
@@ -91,6 +102,71 @@ class MainActivity : Activity() {
             }
         }
         button("开始监听") { startListening() }
+        text("个人唤醒词训练（离线）", 21f)
+        text("按提示逐句录制；每次点击录制后有 3.3 秒说话。提示音节：Hey / Chat / G / P / T（英语字母）。建议点击后稍等半秒再说。", 14f)
+        trainStatusView = TextView(this).apply {
+            textSize = 15f
+            setPadding(0, dp(12), 0, dp(12))
+        }
+        layout.addView(trainStatusView)
+        button("录制当前提示句（3.3 秒自动保存）") {
+            recordPersonalSample()
+        }
+        button("重录上一条 / 删除上一条") {
+            if (preferences.getBoolean("running", false) || capturingClip || trainingModel) {
+                toast("请先停止监听或录制")
+            } else {
+                val previous = PersonalWake.next(this) - 1
+                if (previous >= 0) {
+                    PersonalWake.remove(this, previous)
+                    toast("已删除第 " + (previous + 1) + " 条，请重新录制")
+                    refreshStatus()
+                } else toast("尚无录音")
+            }
+        }
+        button("使用本机样本训练个人模型") {
+            if (capturingClip || trainingModel || preferences.getBoolean("running", false)) {
+                toast("请先结束录制和监听")
+            } else {
+                trainingModel = true
+                preferences.edit().putString("personal_training_result", "训练中：计算声学特征和验证阈值").apply()
+                refreshStatus()
+                PersonalWake.train(this) { ok, result ->
+                    trainingModel = false
+                    preferences.edit().putString("personal_training_result", result).apply()
+                    refreshStatus()
+                    toast(result)
+                }
+            }
+        }
+        button("应用已训练的个人唤醒模型") {
+            if (preferences.getBoolean("running", false) || capturingClip || trainingModel) {
+                toast("请先停止监听、录制或训练")
+            } else if (!PersonalWake.ready(this)) {
+                toast("请先录满全部样本并训练成功")
+            } else {
+                preferences.edit().putString("engine", "PERSONAL").apply()
+                refreshStatus()
+                toast("已应用本地个人模型，点击开始监听测试")
+            }
+        }
+        button("删除所有个人录音和训练结果（再次点击确认）") {
+            if (preferences.getBoolean("running", false) || capturingClip || trainingModel) {
+                toast("请先停止监听、录制或训练")
+            } else if (!confirmErase) {
+                confirmErase = true
+                toast("再次点击将永久删除本机所有个人训练数据")
+            } else {
+                PersonalWake.erase(this)
+                confirmErase = false
+                preferences.edit()
+                    .putString("personal_training_result", "录音和模型已删除").apply()
+                if (preferences.getString("engine", "VOSK") == "PERSONAL") {
+                    preferences.edit().putString("engine", "VOSK").apply()
+                }
+                refreshStatus()
+            }
+        }
         button("停止监听") {
             stopService(Intent(this, ListeningService::class.java))
             preferences.edit().putBoolean("running", false).apply()
@@ -189,6 +265,32 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
+    private fun recordPersonalSample() {
+        if (capturingClip || trainingModel || preferences.getBoolean("running", false)) {
+            toast("请先结束当前监听或训练")
+            return
+        }
+        val index = PersonalWake.next(this)
+        if (index >= PersonalWake.prompts.size) {
+            toast("录音已满，请点击本地训练")
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED) {
+            pendingClip = index
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_TRAIN_RECORD)
+            return
+        }
+        capturingClip = true
+        refreshStatus()
+        PersonalWake.record(this, index) { success, message ->
+            capturingClip = false
+            preferences.edit().putString("personal_training_result", message).apply()
+            refreshStatus()
+            toast(message)
+        }
+    }
+
     private fun startListening() {
         val needed = mutableListOf<String>()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -211,6 +313,14 @@ class MainActivity : Activity() {
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_TRAIN_RECORD) {
+            val allowed = checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+            pendingClip = -1
+            if (allowed) recordPersonalSample()
+            else toast("需要录音权限才能采集自己的训练样本")
+            return
+        }
         if (requestCode != REQUEST_PERMISSIONS || !startAfterPermission) return
         startAfterPermission = false
         val microphone = checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
@@ -274,6 +384,29 @@ class MainActivity : Activity() {
             else -> "最近 5 秒信号很弱；靠近麦克风持续讲话重测"
         }
         val sampleSeconds = String.format(java.util.Locale.US, "%.1f", samples / 16000.0)
+        if (::trainStatusView.isInitialized) {
+            val index = PersonalWake.next(this)
+            val count = PersonalWake.count(this)
+            val current = PersonalWake.prompts.getOrNull(index)
+            val description = if (current == null) {
+                "全部样本录制完成，可以运行本地训练"
+            } else {
+                "第 " + (index + 1) + "/" + PersonalWake.prompts.size + " 条：\n" +
+                    current.phrase + "\n" + current.hint + "\n" +
+                    if (current.group == "positive") {
+                        if (current.heldOut) "保留正例测试（不用于训练）"
+                        else "正例：真实唤醒发音"
+                    } else {
+                        if (current.heldOut) "保留负例测试（不用于训练）"
+                        else "负例：听到这句不应该唤醒"
+                    }
+            }
+            val state = preferences.getString("personal_training_result", "尚未训练")
+            trainStatusView.text = "录音：" + count + "/" + PersonalWake.prompts.size +
+                " · 个人模型：" + (if (PersonalWake.ready(this)) "已生成" else "未训练") +
+                "\n" + description + "\n训练结果：" + state +
+                if (capturingClip) "\n正在录音，请说话…" else ""
+        }
         statusView.text = "运行：$status\n阶段：$stage\n" +
             "选定引擎：$engine · 当前服务引擎：$runningEngine\n" +
             "语音启动方式：" + ChatGptLauncher.modeLabel(voiceMode) + "\n" +
