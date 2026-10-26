@@ -41,7 +41,7 @@ jobs:
           # A speech synthesizer provides a reproducible secondary test.
           # These are not replacements for the upstream real human voice samples.
           sudo apt-get update -qq
-          sudo apt-get install -y -qq espeak-ng
+          sudo apt-get install -y -qq espeak-ng ffmpeg
           espeak-ng -v en-us -s 145 -w test-fixtures/kws/hello-world-source.wav "Hello world"
           espeak-ng -v en-us -s 135 -w test-fixtures/kws/hey-chat-gpt-source.wav "Hey chat G P T"
           ffmpeg -v error -y -i test-fixtures/kws/hello-world-source.wav -ar 16000 -ac 1 test-fixtures/kws/hello-world-synthetic.wav
