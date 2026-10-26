@@ -34,6 +34,8 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check sentencepiece==0.2.1
       - name: Download pinned offline engine and model
         run: bash scripts/prepare-sherpa.sh
+      - name: Prepare checksum-verified Vosk English offline model
+        run: bash scripts/prepare-vosk.sh
       - name: Install offline WAV test runtime
         run: python3 -m pip install --disable-pip-version-check sherpa-onnx==2.0.0 numpy
       - name: Create deterministic English speech fixtures
