@@ -123,8 +123,11 @@ class ListeningService : Service() {
             listening = true
             prefs.edit().putBoolean("running", true).remove("last_error").apply()
             thread(name = "hotword-$selectedEngine", start = true) {
-                if (selectedEngine == "VOSK") recognizeVoskLoop()
-                else recognizeLoop()
+                when (selectedEngine) {
+                    "VOSK" -> recognizeVoskLoop()
+                    "PERSONAL" -> recognizePersonalLoop()
+                    else -> recognizeLoop()
+                }
             }
         } catch (error: Throwable) {
             prefs.edit()
@@ -405,6 +408,163 @@ class ListeningService : Service() {
                             .putString("diag_stage", "Vosk 运行出错")
                             .putString("last_error", lastError)
                             .apply()
+                    }
+                    stopSelf()
+                }
+            }
+        }
+    }
+
+    /**
+     * Independent personal template listener. Endpointed voice is processed
+     * locally with the training-time spectral features + DTW.
+     * No Vosk, no network, no cloud audio.
+     */
+    private fun recognizePersonalLoop() {
+        var recorder: AudioRecord? = null
+        var matched = ""
+        var failure: String? = null
+        try {
+            prefs.edit().putString("diag_stage", "加载个人声学模板").apply()
+            check(PersonalWake.ready(this)) { "没有个人训练模型，请返回训练并点击应用" }
+            val model = PersonalWake.load(this)
+            if (!listening) return
+            check(checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED) { "麦克风权限未获授权" }
+            val minBytes = AudioRecord.getMinBufferSize(
+                SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+            )
+            check(minBytes > 0) { "PCM 缓冲区无效" }
+            val audioSource = if (prefs.getString("audio_source", "MIC") == "VOICE_RECOGNITION") {
+                MediaRecorder.AudioSource.VOICE_RECOGNITION
+            } else MediaRecorder.AudioSource.MIC
+            recorder = AudioRecord(audioSource, SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT, maxOf(minBytes * 2, 6400))
+            check(recorder.state == AudioRecord.STATE_INITIALIZED) { "麦克风未初始化" }
+            recorder.startRecording()
+            check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                "麦克风未开始录音"
+            }
+            prefs.edit().putString("diag_stage", "个人模板监听中：等待完整语音").apply()
+            val chunk = ShortArray(1600)
+            val history = ArrayDeque<ShortArray>()
+            val speech = ArrayList<Short>()
+            var speaking = false
+            var silence = 0
+            var lastMatchAt = 0L
+
+            while (listening) {
+                val count = recorder.read(chunk, 0, chunk.size)
+                if (count < 0) error("PCM 读取失败：" + count)
+                if (count == 0) continue
+                totalSamples += count.toLong()
+                audioReadCalls += 1
+                var sum = 0.0
+                for (i in 0 until count) {
+                    val v = chunk[i] / 32768.0
+                    sum += v * v
+                }
+                val rms = sqrt(sum / count)
+                val db = if (rms <= 0.000001) -99.0 else 20.0 * log10(rms)
+                val voice = db > -51.0
+                val copy = chunk.copyOf(count)
+                decodeSteps++
+                val now = SystemClock.elapsedRealtime()
+
+                if (!speaking) {
+                    history.addLast(copy)
+                    while (history.size > 4) history.removeFirst()
+                    if (voice && now - lastMatchAt > 900) {
+                        speaking = true
+                        silence = 0
+                        speech.clear()
+                        for (part in history) for (s in part) speech.add(s)
+                        history.clear()
+                    }
+                } else {
+                    for (s in copy) speech.add(s)
+                    if (voice) silence = 0 else silence++
+                    val ended = silence >= 7 || speech.size >= SAMPLE_RATE * 42 / 10
+                    if (ended) {
+                        speaking = false
+                        history.clear()
+                        val audio = speech.toShortArray()
+                        speech.clear()
+                        if (audio.size >= SAMPLE_RATE / 2) {
+                            prefs.edit().putString("diag_stage", "个人模板：正在比较音频特征").apply()
+                            try {
+                                val score = PersonalWake.test(model, audio)
+                                val report = String.format(
+                                    java.util.Locale.US,
+                                    "正例距离 %.2f / 负例距离 %.2f / 阈值 %.2f → %s",
+                                    score.positive, score.negative, model.threshold,
+                                    if (score.match) "命中" else "不匹配"
+                                )
+                                prefs.edit().putString("personal_last_score", report).apply()
+                                if (score.match) {
+                                    matched = "PERSONAL_HEY_CHATGPT"
+                                    listening = false
+                                }
+                            } catch (e: IllegalArgumentException) {
+                                prefs.edit().putString("personal_last_score",
+                                    "样本太短，未匹配").apply()
+                            }
+                            lastMatchAt = SystemClock.elapsedRealtime()
+                        }
+                    }
+                }
+
+                recentLevels.addLast(now to db)
+                while (recentLevels.isNotEmpty() && now - recentLevels.first().first > 5000) {
+                    recentLevels.removeFirst()
+                }
+                if (now - lastReportTime >= 650 || !listening) {
+                    lastReportTime = now
+                    val frameworkSilenced = if (Build.VERSION.SDK_INT >= 29) {
+                        try {
+                            when (recorder.activeRecordingConfiguration?.isClientSilenced) {
+                                true -> 1
+                                false -> 0
+                                null -> -1
+                            }
+                        } catch (_: RuntimeException) { -1 }
+                    } else -1
+                    val route = try {
+                        recorder.routedDevice?.productName?.toString() ?: "未知"
+                    } catch (_: RuntimeException) { "未知" }
+                    prefs.edit()
+                        .putString("diag_stage", if (speaking) "个人模板：正在收集语音片段"
+                            else "个人模板：等待下一句话")
+                        .putLong("samples_total", totalSamples)
+                        .putLong("read_calls", audioReadCalls)
+                        .putLong("decode_steps", decodeSteps)
+                        .putInt("rms_db", db.roundToInt())
+                        .putInt("level_percent", ((db + 60) * 2).roundToInt().coerceIn(0,100))
+                        .putInt("five_sec_max_db", recentLevels.maxOfOrNull { it.second }
+                            ?.roundToInt() ?: -99)
+                        .putInt("five_sec_voice_frames", recentLevels.count { it.second > -45 })
+                        .putInt("five_sec_total_frames", recentLevels.size)
+                        .putInt("mic_silenced", frameworkSilenced)
+                        .putString("mic_route", route)
+                        .apply()
+                }
+            }
+        } catch (error: Throwable) {
+            failure = error.message ?: error.javaClass.simpleName
+        } finally {
+            listening = false
+            try { recorder?.stop() } catch (_: Throwable) {}
+            try { recorder?.release() } catch (_: Throwable) {}
+            prefs.edit().putBoolean("running", false).apply()
+            val finalHit = matched
+            val finalError = failure
+            mainThread.post {
+                if (finalHit.isNotEmpty()) {
+                    onWakeWord(finalHit)
+                } else {
+                    if (finalError != null) {
+                        prefs.edit().putString("diag_stage", "个人模板引擎出错")
+                            .putString("last_error", finalError).apply()
                     }
                     stopSelf()
                 }
