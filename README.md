@@ -2,7 +2,7 @@
 
 A no-root experimental Android app for a Pixel 7 to detect **Hey ChatGPT** locally using **sherpa-onnx**, and then hand off to the official ChatGPT Android app.
 
-**v0.5 — no Picovoice account, AccessKey, .ppn download or ChatGPT API key required.** The English model is packaged into the APK.
+**v0.6 — no Picovoice account, AccessKey, .ppn download or ChatGPT API key required.** The English model is packaged into the APK.
 
 ## Direct APK download (no ZIP extraction)
 
@@ -69,6 +69,43 @@ References:
 - https://k2-fsa.github.io/sherpa/onnx/kws/index.html
 - https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html
 - https://developer.android.com/develop/background-work/services/fgs/service-types#microphone
+
+## v0.6 — offline Vosk ASR versus sherpa-onnx KWS
+
+New **engine selector** lets you compare two approaches with the same Pixel
+microphone (one engine at a time, never competing for the mic):
+
+- **VOSK (default)** uses official Apache-2.0 40 MB
+  `vosk-model-small-en-us-0.15` via `vosk-android 0.3.75`. The model ZIP is
+  embedded in the APK; first use extracts it into app-private storage, without
+  network access or account. Allow enough free space (~100 MB after installation).
+- **SHERPA** retains the existing local keyword detector and the standard
+  real-recording self-test from v0.5.
+
+### Suggested on-device test sequence
+
+1. Open v0.6 and confirm **选定引擎：VOSK**; tap **开始监听**.
+2. On initial Vosk startup, wait for model extraction/loading and the stage
+   **Vosk 实时转写中**; initial startup can be noticeably longer.
+3. Say ordinary English, then **Hello World**, then **Hey Chat G P T**.
+4. Observe **Vosk 实时识别** and **Vosk 最近完整句**. Its complete recognized
+   phrases are saved locally in **Vosk 转写记录** for copying and comparison.
+   No audio recording is saved or sent anywhere.
+5. Only exact normalized `hey chat gpt` or `hey chat g p t` matches will
+   launch ChatGPT or create a tap-to-open notification under Android policy;
+   `hello world` triggers a harmless success event.
+6. Stop listening and tap **切换识别引擎** to SHERPA to compare recognition.
+7. The **清空本机转写记录** button clears transcript strings from app preferences.
+   Uninstalling the app also erases its extracted model and all diagnostics.
+
+**Important:** The ASR text is a *diagnostic*, not a guarantee of robust
+hands-free detection. The Vosk recognizer performs utterance endpoint detection.
+We retain an energy-based speech activity meter; we do not aggressively skip
+silent PCM frames because that would interfere with Vosk endpointing.
+
+The first build with this implementation must pass CI. A compiled APK is
+not evidence that the Vosk native engine works perfectly on Pixel 7; send
+diagnostic text rather than repeatedly shouting the wake phrase.
 
 ## v0.5: built-in real-voice regression on Android
 
