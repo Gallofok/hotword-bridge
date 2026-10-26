@@ -65,9 +65,20 @@ class MainActivity : Activity() {
             })
         }
 
-        text("HotwordBridge · 0.5 录音自测版", 26f)
-        text("离线唤醒 · 无需 AccessKey · 实时监测麦克风与识别器", 15f)
-        text("先说英文 Hello World 测试麦克风+模型，再测试 Hey Chat G P T。", 16f)
+        text("HotwordBridge · 0.6 双引擎对照版", 26f)
+        text("Vosk 语音转文字 / sherpa-onnx 关键词检测。全程离线，无需 AccessKey。", 15f)
+        text("初次使用 Vosk 会解压英语模型，请保留手机足够空间。先说 Hello World，再尝试 Hey Chat G P T。", 16f)
+        button("切换识别引擎：Vosk / sherpa（需停止监听）") {
+            if (preferences.getBoolean("running", false)) {
+                toast("请先停止监听")
+            } else {
+                val old = preferences.getString("engine", "VOSK")
+                val next = if (old == "VOSK") "SHERPA" else "VOSK"
+                preferences.edit().putString("engine", next).apply()
+                refreshStatus()
+                toast("下次启动使用：$next")
+            }
+        }
         button("切换麦克风输入源（需停止监听）") {
             if (preferences.getBoolean("running", false)) {
                 toast("请先点击停止监听")
@@ -114,6 +125,15 @@ class MainActivity : Activity() {
                     toast(result)
                 }
             }
+        }
+        button("清空本机转写记录") {
+            preferences.edit()
+                .putString("vosk_partial", "")
+                .putString("vosk_final", "")
+                .putString("vosk_log", "")
+                .putInt("vosk_utterances", 0)
+                .apply()
+            refreshStatus()
         }
         button("复制诊断数据") {
             val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
@@ -205,6 +225,12 @@ class MainActivity : Activity() {
         }
         val route = preferences.getString("mic_route", "未知")
         val source = preferences.getString("audio_source", "MIC")
+        val engine = preferences.getString("engine", "VOSK")
+        val runningEngine = preferences.getString("active_engine", "无")
+        val partial = preferences.getString("vosk_partial", "").orEmpty()
+        val finalResult = preferences.getString("vosk_final", "").orEmpty()
+        val log = preferences.getString("vosk_log", "").orEmpty()
+        val utterances = preferences.getInt("vosk_utterances", 0)
         val level = preferences.getInt("level_percent", 0)
         val selfTest = preferences.getString("self_test", "尚未运行").orEmpty()
         val event = preferences.getString("last_event", "").orEmpty()
@@ -219,6 +245,7 @@ class MainActivity : Activity() {
         }
         val sampleSeconds = String.format(java.util.Locale.US, "%.1f", samples / 16000.0)
         statusView.text = "运行：$status\n阶段：$stage\n" +
+            "选定引擎：$engine · 当前服务引擎：$runningEngine\n" +
             "麦克风输入源：$source（可切换）\n录音设备：$route\n" +
             "Android 系统静音：$silenced\n" +
             "已读取音频：$sampleSeconds 秒 · $reads 次读取\n" +
@@ -228,7 +255,14 @@ class MainActivity : Activity() {
             "判断：$audioMeaning\n" +
             "模型解码步数：$steps\n" +
             "标准录音自测：$selfTest\n" +
-            "识别阈值：Hey ChatGPT=0.12 / Hello World=0.20\n" +
+            (if (engine == "VOSK") {
+                "Vosk 已完成话语：$utterances\n" +
+                "Vosk 实时识别：${partial.ifBlank { "（暂无）" }}\n" +
+                "Vosk 最近完整句：${finalResult.ifBlank { "（暂无）" }}\n" +
+                "Vosk 转写记录（仅本机）：\n${log.ifBlank { "（暂无）" }}\n"
+            } else {
+                "sherpa 阈值：Hey ChatGPT=0.12 / Hello World=0.20\n"
+            }) +
             (if (event.isNotEmpty()) "最近触发：$event\n" else "") +
             (if (error.isNotEmpty()) "错误：$error" else "")
     }
