@@ -65,7 +65,7 @@ class MainActivity : Activity() {
             })
         }
 
-        text("HotwordBridge · 0.4 采样诊断版", 26f)
+        text("HotwordBridge · 0.5 录音自测版", 26f)
         text("离线唤醒 · 无需 AccessKey · 实时监测麦克风与识别器", 15f)
         text("先说英文 Hello World 测试麦克风+模型，再测试 Hey Chat G P T。", 16f)
         button("切换麦克风输入源（需停止监听）") {
@@ -102,6 +102,19 @@ class MainActivity : Activity() {
             setPadding(0, dp(20), 0, dp(16))
         }
         layout.addView(statusView)
+        button("运行官方真人录音自测（不使用麦克风）") {
+            if (preferences.getBoolean("running", false)) {
+                toast("请先停止麦克风监听，再运行标准录音自测")
+            } else {
+                preferences.edit().putString("self_test", "正在检测官方真人录音").apply()
+                refreshStatus()
+                KwsSelfTest.run(this) { passed, result ->
+                    preferences.edit().putString("self_test", result).apply()
+                    refreshStatus()
+                    toast(result)
+                }
+            }
+        }
         button("复制诊断数据") {
             val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText(
@@ -193,6 +206,7 @@ class MainActivity : Activity() {
         val route = preferences.getString("mic_route", "未知")
         val source = preferences.getString("audio_source", "MIC")
         val level = preferences.getInt("level_percent", 0)
+        val selfTest = preferences.getString("self_test", "尚未运行").orEmpty()
         val event = preferences.getString("last_event", "").orEmpty()
         val error = preferences.getString("last_error", "").orEmpty()
 
@@ -213,6 +227,7 @@ class MainActivity : Activity() {
             "最近 5 秒声音窗口：$voiceFrames / $totalFrames（高于 -45 dBFS）\n" +
             "判断：$audioMeaning\n" +
             "模型解码步数：$steps\n" +
+            "标准录音自测：$selfTest\n" +
             "识别阈值：Hey ChatGPT=0.12 / Hello World=0.20\n" +
             (if (event.isNotEmpty()) "最近触发：$event\n" else "") +
             (if (error.isNotEmpty()) "错误：$error" else "")
