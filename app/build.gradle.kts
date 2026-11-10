@@ -11,10 +11,10 @@ android {
         applicationId = "io.github.gallofok.hotwordbridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.9.0"
+        versionCode = 10
+        versionName = "1.0.0"
 
-        // Initial test build is for Pixel 7 (ARM64).
+        // Built for Pixel phones (ARM64).
         ndk { abiFilters += "arm64-v8a" }
     }
 
@@ -23,11 +23,17 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    // Models are read whole into memory; keep them uncompressed in the APK.
+    androidResources { noCompress += "onnx" }
 }
 
+val onnxRuntime = "1.31.1"
+
 dependencies {
-    // Prepared by scripts/prepare-sherpa.sh; no external API key required.
-    implementation(files("libs/sherpa-onnx.aar"))
-    implementation("net.java.dev.jna:jna:5.18.1@aar")
-    implementation("com.alphacephei:vosk-android:0.3.75@aar")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:$onnxRuntime")
+
+    // Unit tests run the same models on the build machine's JVM.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:$onnxRuntime")
 }
