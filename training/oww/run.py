@@ -172,6 +172,31 @@ def train(flag):
     return run
 
 
+def add_user_clips():
+    """Mix the owner's real recordings into the synthetic sets. Each clip is copied many times with a random speed and
+    gain change, and the augmentation stage then adds different noise and room echo to every copy."""
+    import numpy as np, soundfile as sf
+    from scipy.signal import resample_poly
+    src = Path(os.environ.get("KGRUN_IN", "")) 
+    found = {k: sorted(src.glob(f"**/{k}/*.wav")) for k in ("pos", "neg")} if str(src) else {"pos": [], "neg": []}
+    say("user clips:", {k: len(v) for k, v in found.items()})
+    if not found["pos"]:
+        say("no user clips: training on synthetic data only"); return
+    rng = np.random.default_rng(0)
+    for kind, sub in (("pos", "positive_train"), ("neg", "negative_train")):
+        dest = Path("model_out") / MODEL_NAME / sub
+        before = len(list(dest.glob("*.wav")))
+        copies = P.get("user_copies", 50)
+        for f in found[kind]:
+            x, sr = sf.read(f, dtype="float32"); assert sr == 16000, f
+            for i in range(copies):
+                rate = rng.uniform(0.88, 1.15)                      # >1 = slower and lower
+                y = resample_poly(x, int(round(rate * 100)), 100) if i else x
+                y = y * rng.uniform(0.5, 1.6) * (0.5 / (np.abs(y).max() + 1e-6)) if i else y
+                sf.write(dest / f"user_{f.stem}_{i:03d}.wav", np.clip(y, -1, 1)[: int(1.95 * 16000)], 16000, subtype="PCM_16")
+        say(sub, before, "->", len(list(dest.glob("*.wav"))))
+
+
 def collect():
     sh("ls -la model_out | head -30; for d in model_out/*/*; do echo $d $(ls $d | wc -l); done", check=False)
     for f in glob.glob("model_out/*.onnx") + glob.glob("model_out/*.onnx.data"):
@@ -187,7 +212,8 @@ def collect():
 ok = False
 try:
     stage("deps", deps); stage("downloads", downloads); stage("config", config)
-    stage("generate_clips", train("generate_clips")); stage("augment_clips", train("augment_clips"))
+    stage("generate_clips", train("generate_clips")); stage("add_user_clips", add_user_clips)
+    stage("augment_clips", train("augment_clips"))
     stage("train_model", train("train_model")); stage("collect", collect)
     ok = True
 finally:

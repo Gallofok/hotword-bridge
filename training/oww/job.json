@@ -1,1 +1,1 @@
-{"name": "hwb-oww", "script": "run.py", "accelerator": "t4", "internet": true, "timeout_s": 21600}
+{"name": "hwb-oww", "script": "run.py", "accelerator": "t4", "internet": true, "inputs": ["user_clips/"], "timeout_s": 21600}
