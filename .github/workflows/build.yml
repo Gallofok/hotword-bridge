@@ -26,60 +26,31 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Set up Python for keyword tokenization
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install sentencepiece
-        run: python3 -m pip install --disable-pip-version-check sentencepiece==0.2.1
-      - name: Download pinned offline engine and model
-        run: bash scripts/prepare-sherpa.sh
-      - name: Prepare checksum-verified Vosk English offline model
-        run: bash scripts/prepare-vosk.sh
-      - name: Install offline WAV test runtime
-        run: python3 -m pip install --disable-pip-version-check sherpa-onnx==2.0.0 numpy
-      - name: Create deterministic English speech fixtures
-        run: |
-          # A speech synthesizer provides a reproducible secondary test.
-          # These are not replacements for the upstream real human voice samples.
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq espeak-ng ffmpeg
-          espeak-ng -v en-us -s 145 -w test-fixtures/kws/hello-world-source.wav "Hello world"
-          espeak-ng -v en-us -s 135 -w test-fixtures/kws/hey-chat-gpt-source.wav "Hey chat G P T"
-          ffmpeg -v error -y -i test-fixtures/kws/hello-world-source.wav -ar 16000 -ac 1 test-fixtures/kws/hello-world-synthetic.wav
-          ffmpeg -v error -y -i test-fixtures/kws/hey-chat-gpt-source.wav -ar 16000 -ac 1 test-fixtures/kws/hey-chat-gpt-synthetic.wav
-          espeak-ng -v en-us -s 145 -w test-fixtures/kws/light-up-source.wav "Light up"
-          ffmpeg -v error -y -i test-fixtures/kws/light-up-source.wav -ar 16000 -ac 1 test-fixtures/kws/light-up-synthetic.wav
-          # Package ONE known-good human recording in the APK, as raw 16kHz PCM.
-          # Used only by the diagnostic self-test and never sent over the network.
-          cp test-fixtures/kws/official_keywords.txt app/src/main/assets/kws/official_keywords.txt
-          ffmpeg -v error -y -i test-fixtures/kws/0.wav -ac 1 -ar 16000 -f s16le app/src/main/assets/kws/official-light-up.pcm
-          test -s app/src/main/assets/kws/official-light-up.pcm
-      - name: Regression test real WAV against shipped keywords engine
-        run: python3 scripts/test-kws-recording.py
-      - name: Show recording test results
-        if: always()
-        run: |
-          if [ -s test-fixtures/kws/test-results.json ]; then
-            echo "### Keyword spotting WAV regression" >> "$GITHUB_STEP_SUMMARY"
-            echo '~~~json' >> "$GITHUB_STEP_SUMMARY"
-            cat test-fixtures/kws/test-results.json >> "$GITHUB_STEP_SUMMARY"
-            echo '~~~' >> "$GITHUB_STEP_SUMMARY"
-          fi
+      - name: Download pinned openWakeWord feature models
+        run: bash scripts/prepare-oww.sh
       # GitHub-hosted Ubuntu includes the Android SDK.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - name: Run detector unit tests
+        run: gradle --no-daemon :app:testDebugUnitTest
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests
       - name: Assemble debug APK
         run: gradle --no-daemon :app:assembleDebug
+      - name: Report APK size
+        run: ls -la app/build/outputs/apk/debug/ && sha256sum app/build/outputs/apk/debug/app-debug.apk
       - name: Prepare direct-download APK
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk dist/HotwordBridge.apk
           test -s dist/HotwordBridge.apk
-          sha256sum dist/HotwordBridge.apk
       - name: Publish directly downloadable APK to GitHub Releases
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
@@ -91,6 +62,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "HotwordBridge · Android test build ${GITHUB_RUN_NUMBER}" \
-            --notes "Direct-install Android APK. No ZIP extraction required. This is an experimental debug build; wake-word detection has not been verified on all phones. Compiled from commit ${GITHUB_SHA}." \
+            --notes "Direct-install Android APK. Experimental debug build. Compiled from commit ${GITHUB_SHA}." \
             --latest
           echo "Direct download: https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/HotwordBridge.apk" >> "$GITHUB_STEP_SUMMARY"

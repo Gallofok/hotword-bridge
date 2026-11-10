@@ -10,8 +10,10 @@ captures/
 *.aab
 *.keystore
 *.jks
-*.ppn
 app/libs/
-app/src/main/assets/kws/
-# Vosk model is downloaded and verified by GitHub Actions
-app/src/main/assets/vosk-model.zip
+__pycache__/
+# Downloaded by scripts/prepare-oww.sh (pinned by SHA256)
+app/src/main/assets/oww/melspectrogram.onnx
+app/src/main/assets/oww/embedding_model.onnx
+# Personal voice recordings never go into the repository
+training/oww/user_clips/
