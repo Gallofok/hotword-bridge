@@ -60,7 +60,9 @@ jobs:
           apk=app/build/outputs/apk/debug/app-debug.apk
           ls -la "$apk"
           apksigner="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
-          actual="$("$apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          "$apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/certs.txt" 2>&1 || { cat "$RUNNER_TEMP/certs.txt"; exit 1; }
+          grep -v '^WARNING' "$RUNNER_TEMP/certs.txt" || true
+          actual="$(grep -m1 'certificate SHA-256 digest:' "$RUNNER_TEMP/certs.txt" | sed 's/.*digest: *//')"
           echo "APK signing certificate SHA-256: $actual"
           if [ -n "${HWB_KEYSTORE_FILE:-}" ]; then
             test "$actual" = "$EXPECTED_CERT_SHA256" || { echo "APK is not signed with the permanent key" >&2; exit 1; }
