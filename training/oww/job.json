@@ -1,0 +1,1 @@
+{"name": "hwb-oww", "script": "run.py", "accelerator": "t4", "internet": true, "timeout_s": 21600}

@@ -1,0 +1,1 @@
+{"smoke": false, "n_samples": 10000, "n_samples_val": 1000, "steps": 25000, "audioset_clips": 2000}
