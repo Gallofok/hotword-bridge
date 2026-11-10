@@ -41,10 +41,37 @@ jobs:
         with:
           name: unit-test-report
           path: app/build/reports/tests
+      - name: Restore signing key
+        env:
+          HWB_KEYSTORE_BASE64: ${{ secrets.HWB_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$HWB_KEYSTORE_BASE64" ]; then
+            printf '%s' "$HWB_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/hwb-release.p12"
+            echo "HWB_KEYSTORE_FILE=$RUNNER_TEMP/hwb-release.p12" >> "$GITHUB_ENV"
+          else
+            echo "No signing key available (for example a pull request from a fork): using the temporary debug key."
+          fi
       - name: Assemble debug APK
+        env:
+          HWB_KEYSTORE_PASSWORD: ${{ secrets.HWB_KEYSTORE_PASSWORD }}
         run: gradle --no-daemon :app:assembleDebug
-      - name: Report APK size
-        run: ls -la app/build/outputs/apk/debug/ && sha256sum app/build/outputs/apk/debug/app-debug.apk
+      - name: Check APK signature
+        run: |
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          ls -la "$apk"
+          apksigner="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
+          "$apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/certs.txt" 2>&1 || { cat "$RUNNER_TEMP/certs.txt"; exit 1; }
+          grep -v '^WARNING' "$RUNNER_TEMP/certs.txt" || true
+          actual="$(grep -m1 'certificate SHA-256 digest:' "$RUNNER_TEMP/certs.txt" | sed 's/.*digest: *//')"
+          echo "APK signing certificate SHA-256: $actual"
+          if [ -n "${HWB_KEYSTORE_FILE:-}" ]; then
+            test "$actual" = "$EXPECTED_CERT_SHA256" || { echo "APK is not signed with the permanent key" >&2; exit 1; }
+          elif [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "Refusing to publish an APK signed with a temporary key" >&2; exit 1
+          fi
+        env:
+          # SHA-256 of the permanent signing certificate (public information).
+          EXPECTED_CERT_SHA256: ce9ed7fe261d06957c142dfe2b14467de37d50d91a1a50ba4afafe9e142c5a90
       - name: Prepare direct-download APK
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
