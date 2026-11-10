@@ -40,9 +40,9 @@ Settings on the main screen:
 | ChatGPT 启动方式 | Which screen to open: automatic, voice activity, voice link, or the app's home screen. |
 | 麦克风输入源 | `VOICE_RECOGNITION` (default) or `MIC`. |
 
-Each build is signed with a temporary debug key, so a newer APK may refuse to
-install over an older one. Uninstall the old one first; only the settings are
-lost.
+From version 1.0.1 every published build is signed with the same key, so a new
+APK installs over the old one. Version 1.0.0 was signed with a temporary key:
+uninstall it once before installing a newer build (only the settings are lost).
 
 ## Limits
 
